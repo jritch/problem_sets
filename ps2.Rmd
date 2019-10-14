@@ -1,7 +1,7 @@
 ---
 title: "Psych 251 PS2: Tidying Data"
-author: "Andrew Lampinen"
-date: "September 27, 2018"
+author: "Jacob Ritchie"
+date: "October 10, 2019"
 output:
   html_document:
     toc: true
@@ -25,6 +25,7 @@ library(tidyr)
 library(dplyr)
 library(stringr) # useful for some string manipulation
 library(ggplot2)
+library(plotrix)
 ```
 
 # Load Data
@@ -50,12 +51,18 @@ colnames(d)
 And see if you can figure out what range the likert scores are in. What's the highest number on the likert scale, and what's the lowest? (Hint, `d$Game1Angry1` is one of the likert rating columns, and you may want to use `unique` or `range` or `hist`)
 
 ```{r}
-## your code here
+d %>% filter(!is.na(Game2Angry1)) %>% select(Game1Angry1) %>% range # use range
 
+#d$Game2Angry1 # look at all values directly
+
+# d %>% ggplot(aes(x=Game2Angry1)) + geom_histogram(binwidth = 1) # alternative histogram code
+
+hist(d$Game2Angry1,breaks=c(0.5,1.5,2.5,3.5,4.5,5.5,6.5,7.5,8.5)) # use histogram
 ```
 
-Highest number: [Your answer here]
-Lowest number: [Your answer here]
+Highest number: 7
+
+Lowest number: 1
 
 # cleaning up a bit
 
@@ -81,7 +88,7 @@ The researchers have made a column called `DoNotUse` based on their exlusion cri
 
 ```{r}
 filtered_d = d %>% 
-  filter(   ) # your code here: exclude subjects that are marked as "DoNotUse"
+  filter( is.na(DoNotUse)  ) # your code here: exclude subjects that are marked as "DoNotUse"
 ```
 
 It's good practice to assign a new variable name (in this case `filtered_d`) to a data frame when you change it in an important way, or apply a code chunk that shouldn't be run twice. This helps prevent you seeing different results when you run your code in chunks (and might run one multiple times, or skip it, etc.) vs. knit the document.
@@ -117,8 +124,14 @@ rating_hyp_d = filtered_d %>%
 Now you try! Fill in the selection criteria to get rid of the "Game" columns, which we don't need for the performance hypothesis. (It's simpler than the code block above, because you don't need to do a `filter` first, only a `select`.)
 
 ```{r}
-performance_hyp_d = filtered_d %>% 
-  select( ) # your code here: remove the columns containing "Game" in the name
+performance_hyp_d = filtered_d %>%  
+  # The instructions say that you don't need to use a `filter`, but since this is the performance hypothesis, it makes more sense to filter out the subjects with unusable performance data
+  filter(is.na(DoNotUseVideoGamePerformanceData)) %>% 
+  # additionally, if I don't get rid of the DoNotUseVideoGamePerformanceData column, I get an error when I try to compute the ImprovementScore
+  select( -DoNotUseVideoGamePerformanceData, -starts_with("Game") )
+  
+  # If I just wanted to get rid of the "Game" columns, I would use the code below:
+  #select( -starts_with("Game") )# your code here: remove the columns containing "Game" in the name
 ```
 
 # Converting to long form
@@ -136,7 +149,7 @@ tiny_demo_d
 
 Now, take a look at the long-form version:
 ```{r}
-tiny_demo_d %>% gather(Measurment, Value, 
+tiny_demo_d %>% gather(Measurement, Value, 
                        -c("Subject", "Cond")) # this tells it to gather all columns *except* these ones.
 ```
 
@@ -152,8 +165,8 @@ performance_hyp_long_d = performance_hyp_d %>%
 And you can convert the rating dataset! (Call the "Key" column "Measurement" and call the "Value" column "Rating", so that the code below will work)
 
 ```{r}
-rating_hyp_long_d = rating_hyp_d %>%
-  ## your code here
+rating_hyp_long_d = rating_hyp_d %>% 
+  gather(Measurement, Rating, -c("Subject", "Cond"))
 ```
 
 # Splitting columns
@@ -173,7 +186,7 @@ Now you can help! For the rating dataset, write a test on a measurement name, us
 ```{r}
 rating_hyp_long_d = rating_hyp_long_d %>%
   mutate(
-    IsRecall = ,## Your code here
+    IsRecall = grepl("Friends|Strangers",Measurement)
   )
 ```
 
@@ -221,7 +234,8 @@ The rating hypothesis analysis also requires some grouped manipulation: the expe
 
 ```{r}
 rating_summary_d = rating_hyp_long_d %>% 
-  ## your code here
+  group_by(Emotion,ConfrontationalGame) %>% 
+  summarize(MeanRating = mean(Rating))
 ```
 
 Let's take a look at the result:
@@ -254,6 +268,9 @@ There are still a few more steps to go for the performance hypothesis. We need t
 To compute the difference score, we have to make our data a bit wider. We now want to subtract the pre-music scores from the post-music scores, which is easiest to do if they are in two different columns. To do this we'll use the `spread` function (which is more or less the opposite of `gather`)
 
 ```{r}
+
+#performance_hyp_long_d <- performance_hyp_long_d %>% filter(Measurement != "DoNotUseVideoGamePerformanceData")
+
 performance_diff_d = performance_hyp_long_d %>%
   mutate(WithMusic = factor(WithMusic, levels=c(F, T), labels=c("PreMusic", "PostMusic"))) %>% # first, tweak the variable so our code is easier to read.
   select(-c("Score", "Measurement")) %>% # now we remove columns we don't need (bonus: leave them in and see if you can understand what goes wrong!)
@@ -272,8 +289,15 @@ If you don't understand every step of that code (or any other `dplyr` code), it 
 Now we're finally to reproduce Fig. 2 from Tamir et al., we just need to get the mean differences within each game and each kind of music, and save them to a variable called `MeanImprovementScore`:
 
 ```{r}
-performance_diff_summary_d = performance_diff_d %>%
-  ## Your code here
+# the extra variables SEMImprovementScore, lower and upper are for plotting the SEM error bars
+
+performance_diff_summary_d = performance_diff_d %>% 
+  group_by(ConfrontationalGame,MusicCondition) %>% 
+  summarise(MeanImprovementScore = mean(ImprovementScore, na.rm=T), 
+            SEMImprovementScore = std.error(ImprovementScore, na.rm=T)) %>%
+  mutate(lower = MeanImprovementScore - SEMImprovementScore,
+        upper = MeanImprovementScore + SEMImprovementScore)
+  
 ```
 
 Let's take a look at your result (if it has `NA` values, how can you fix it?):
@@ -285,9 +309,12 @@ performance_diff_summary_d
 and plot it!
 
 ```{r TamirFig2}
+# for the error bar code, I looked at the documentation here: https://ggplot2.tidyverse.org/reference/geom_linerange.html
+dodge <- position_dodge(width=0.9)
 ggplot(performance_diff_summary_d, aes(x=ConfrontationalGame, y=MeanImprovementScore, fill=MusicCondition)) +
-  geom_bar(position="dodge", stat="identity") + 
-  scale_fill_brewer(palette="Set1")
+  geom_bar(position=dodge, stat="identity") + 
+  scale_fill_brewer(palette="Set1") + geom_errorbar(aes(ymin=lower,ymax=upper), position = dodge, width=0.25)
+  
 ```
 
 (Bonus: also calculate the SEM in the summary data, and then add errorbars to the plot with `geom_errorbar`!)
